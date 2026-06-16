@@ -15,13 +15,13 @@
   <Description DefaultValue="Speichert die aktuelle Email mit einem Klick in die Thronsberg-Datenbank."/>
 
   <!-- Icon für den Task Pane (Basis-Manifest) -->
-  <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
-  <SupportUrl DefaultValue="https://thronsberg.com"/>
+  <IconUrl DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/icon-64.png"/>
+  <SupportUrl DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/"/>
 
   <AppDomains>
     <AppDomain>https://icviicydkrjewtnzkeud.supabase.co</AppDomain>
-    <AppDomain>https://localhost:3000</AppDomain>
+    <AppDomain>https://ludwigtr.github.io</AppDomain>
   </AppDomains>
 
   <Hosts>
@@ -37,7 +37,7 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://localhost:3000/src/taskpane.html"/>
+        <SourceLocation DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/taskpane.html"/>
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -98,15 +98,15 @@
 
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon16"  DefaultValue="https://localhost:3000/assets/icon-16.png"/>
-        <bt:Image id="Icon32"  DefaultValue="https://localhost:3000/assets/icon-32.png"/>
-        <bt:Image id="Icon64"  DefaultValue="https://localhost:3000/assets/icon-64.png"/>
-        <bt:Image id="Icon80"  DefaultValue="https://localhost:3000/assets/icon-80.png"/>
+        <bt:Image id="Icon16"  DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/icon-16.png"/>
+        <bt:Image id="Icon32"  DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/icon-32.png"/>
+        <bt:Image id="Icon64"  DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/icon-64.png"/>
+        <bt:Image id="Icon80"  DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/icon-80.png"/>
       </bt:Images>
 
       <bt:Urls>
-        <bt:Url id="Commands.Url"  DefaultValue="https://localhost:3000/src/commands.html"/>
-        <bt:Url id="Taskpane.Url"  DefaultValue="https://localhost:3000/src/taskpane.html"/>
+        <bt:Url id="Commands.Url"  DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/commands.html"/>
+        <bt:Url id="Taskpane.Url"  DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/taskpane.html"/>
       </bt:Urls>
 
       <bt:ShortStrings>
