@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
+  xsi:type="MailApp">
+
+  <!-- Eindeutige Add-in-ID (GUID) -->
+  <Id>7f3a9d2e-b5c1-4f8a-9e0d-3a6b2c4d1e5f</Id>
+  <Version>1.0.0</Version>
+  <ProviderName>Thronsberg</ProviderName>
+  <DefaultLocale>de-DE</DefaultLocale>
+  <DisplayName DefaultValue="Email to Supabase"/>
+  <Description DefaultValue="Speichert die aktuelle Email mit einem Klick in die Thronsberg-Datenbank."/>
+
+  <!-- Icon für den Task Pane (Basis-Manifest) -->
+  <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
+  <SupportUrl DefaultValue="https://thronsberg.com"/>
+
+  <AppDomains>
+    <AppDomain>https://icviicydkrjewtnzkeud.supabase.co</AppDomain>
+    <AppDomain>https://localhost:3000</AppDomain>
+  </AppDomains>
+
+  <Hosts>
+    <Host Name="Mailbox"/>
+  </Hosts>
+
+  <Requirements>
+    <Sets>
+      <Set Name="Mailbox" MinVersion="1.5"/>
+    </Sets>
+  </Requirements>
+
+  <FormSettings>
+    <Form xsi:type="ItemRead">
+      <DesktopSettings>
+        <SourceLocation DefaultValue="https://localhost:3000/src/taskpane.html"/>
+        <RequestedHeight>450</RequestedHeight>
+      </DesktopSettings>
+    </Form>
+  </FormSettings>
+
+  <Permissions>ReadItem</Permissions>
+
+  <Rule xsi:type="RuleCollection" Mode="Or">
+    <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/>
+  </Rule>
+
+  <DisableEntityHighlighting>false</DisableEntityHighlighting>
+
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
+
+    <Requirements>
+      <bt:Sets DefaultMinVersion="1.5">
+        <bt:Set Name="Mailbox"/>
+      </bt:Sets>
+    </Requirements>
+
+    <Hosts>
+      <Host xsi:type="MailHost">
+        <DesktopFormFactor>
+
+          <FunctionFile resid="Commands.Url"/>
+
+          <ExtensionPoint xsi:type="MessageReadCommandSurface">
+            <OfficeTab id="TabDefault">
+              <Group id="msgReadGroup">
+                <Label resid="GroupLabel"/>
+
+                <Control xsi:type="Button" id="saveEmailBtn">
+                  <Label resid="SaveBtnLabel"/>
+                  <Supertip>
+                    <Title resid="SaveBtnTitle"/>
+                    <Description resid="SaveBtnDesc"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon16"/>
+                    <bt:Image size="32" resid="Icon32"/>
+                    <bt:Image size="64" resid="Icon64"/>
+                    <bt:Image size="80" resid="Icon80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="Taskpane.Url"/>
+                    <SupportsPinning>true</SupportsPinning>
+                  </Action>
+                </Control>
+
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Icon16"  DefaultValue="https://localhost:3000/assets/icon-16.png"/>
+        <bt:Image id="Icon32"  DefaultValue="https://localhost:3000/assets/icon-32.png"/>
+        <bt:Image id="Icon64"  DefaultValue="https://localhost:3000/assets/icon-64.png"/>
+        <bt:Image id="Icon80"  DefaultValue="https://localhost:3000/assets/icon-80.png"/>
+      </bt:Images>
+
+      <bt:Urls>
+        <bt:Url id="Commands.Url"  DefaultValue="https://localhost:3000/src/commands.html"/>
+        <bt:Url id="Taskpane.Url"  DefaultValue="https://localhost:3000/src/taskpane.html"/>
+      </bt:Urls>
+
+      <bt:ShortStrings>
+        <bt:String id="GroupLabel"    DefaultValue="Thronsberg"/>
+        <bt:String id="SaveBtnLabel"  DefaultValue="In DB speichern"/>
+        <bt:String id="SaveBtnTitle"  DefaultValue="Email in Supabase speichern"/>
+      </bt:ShortStrings>
+
+      <bt:LongStrings>
+        <bt:String id="SaveBtnDesc" DefaultValue="Speichert diese Email in der Thronsberg-Datenbank (email_activities)."/>
+      </bt:LongStrings>
+    </Resources>
+
+  </VersionOverrides>
+
+</OfficeApp>
