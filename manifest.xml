@@ -7,7 +7,7 @@
   xsi:type="MailApp">
 
   <!-- Eindeutige Add-in-ID (GUID) -->
-  <Id>7f3a9d2e-b5c1-4f8a-9e0d-3a6b2c4d1e5f</Id>
+  <Id>9c2e1a74-3b6d-4e88-a1f2-7d5c8e0b4a63</Id>
   <Version>1.1.1</Version>
   <ProviderName>Thronsberg</ProviderName>
   <DefaultLocale>de-DE</DefaultLocale>
