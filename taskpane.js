@@ -525,8 +525,7 @@ $('saveBtn').addEventListener('click', function() {
   setStatus('loading', '⏳ Saving…');
 
   var projectId = $('projectSelect').value || null;
-  var subject   = $('emailSubjectInput').value;
-  var body      = $('emailBodyInput').value;
+  var body      = $('emailBodyInput').value;   // subject is read inside buildHeader()
 
   var payload = {
     contact_id:   (matchedContact && matchedContact.contact_id) || null,
@@ -550,14 +549,17 @@ $('saveBtn').addEventListener('click', function() {
   sbInsert('activities', payload)
     .then(function(result) {
       if (!doStatusChange) return { changed: false };
+      // Link the status change to the saved email (activity_id). We do NOT copy subject/body
+      // into reason_header/footer — the timeline falls back to the linked email's content,
+      // and those fields stay empty unless someone edits the reason manually in the app.
+      var activityId = (result && result.email_activity_id) || null;
       // Send both stage and status (current-or-edited) so the trigger logs only real diffs.
       return sbRpc('apply_status_change', {
-        p_contact_id:    matchedContact.contact_id,
-        p_project_id:    projectId,
-        p_stage:         newStage,
-        p_status:        newStatus,
-        p_reason_header: subject,   // subject only -> reason_header
-        p_reason_footer: body,      // body -> reason_footer
+        p_contact_id: matchedContact.contact_id,
+        p_project_id: projectId,
+        p_stage:      newStage,
+        p_status:     newStatus,
+        p_activity_id: activityId,
       }).then(function() { return { changed: true }; });
     })
     .then(function(outcome) {
