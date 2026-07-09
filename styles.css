@@ -94,7 +94,7 @@ html, body {
 
 /* ── Inputs / Select ── */
 input[type="text"], input[type="email"], input[type="password"],
-input[type="search"], select {
+input[type="search"], select, textarea {
   width: 100%;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -106,7 +106,8 @@ input[type="search"], select {
   outline: none;
   transition: border-color 0.15s;
 }
-input:focus, select:focus { border-color: rgba(200,169,110,0.4); }
+textarea { resize: vertical; min-height: 90px; line-height: 1.5; }
+input:focus, select:focus, textarea:focus { border-color: rgba(200,169,110,0.4); }
 input::placeholder { color: var(--text-dim); }
 select option { background: #1a2035; }
 select { cursor: pointer; }

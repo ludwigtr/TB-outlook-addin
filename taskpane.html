@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Thronsberg — Email speichern</title>
+  <title>Thronsberg — Save Email</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
   <link rel="stylesheet" href="styles.css"/>
 </head>
@@ -23,79 +23,110 @@
   <!-- ── Main Body ── -->
   <div class="body" id="mainBody">
 
-    <!-- Zustand: Office.js noch nicht geladen / kein Kontext -->
+    <!-- State: Office.js not ready -->
     <div class="not-ready" id="notReady">
       <span class="icon">⏳</span>
-      Add-in wird initialisiert…
+      Initializing add-in…
     </div>
 
-    <!-- Zustand: Konfiguration fehlt -->
+    <!-- State: config missing -->
     <div class="not-ready" id="notConfigured" style="display:none">
       <span class="icon">⚙️</span>
-      Bitte zuerst die Supabase-Verbindung in den Einstellungen konfigurieren.
+      Please configure the Supabase connection in Settings first.
     </div>
 
-    <!-- Zustand: Nicht eingeloggt -->
+    <!-- State: not logged in -->
     <div class="not-ready" id="notLoggedIn" style="display:none">
       <span class="icon">🔐</span>
-      Bitte in den Einstellungen mit einem Supabase-Account einloggen.
+      Please log in with a Supabase account in Settings.
     </div>
 
-    <!-- Zustand: Bereit (Email lesen + speichern) -->
+    <!-- State: ready -->
     <div id="readyContent" style="display:none">
 
-      <!-- Email-Karte (Absender, Betreff, Tags) -->
-      <div class="email-card" id="emailCard">
-        <div class="email-card-from" id="emailFrom">–</div>
-        <div class="email-card-subject" id="emailSubject">–</div>
-        <div class="email-card-meta" id="emailMeta"></div>
-      </div>
-
-      <!-- Kontakt-Matching -->
-      <div>
-        <div class="section-label">Kontakt</div>
-
-        <!-- Auto-Match-Ergebnis -->
-        <div class="match-result" id="matchResult">
-          <div class="match-name" id="matchName"></div>
-          <div class="match-email" id="matchEmail"></div>
-          <button class="secondary-btn" id="matchClearBtn" style="margin-top:6px">Anderen Kontakt wählen</button>
-        </div>
-
-        <!-- Manuelle Suche (kein Match / mehrere Treffer) -->
-        <div id="contactSearch" style="display:none">
-          <input type="search" id="contactSearchInput" placeholder="Name oder Email suchen…" autocomplete="off"/>
-          <div class="search-results" id="searchResults"></div>
-          <div style="margin-top:5px; font-size:11px; color:var(--text-dim)">
-            Kein passender Kontakt?
-            <button class="secondary-btn" id="skipContactBtn" style="width:auto; display:inline; padding:2px 8px; font-size:11px; margin-left:4px">Ohne Kontakt speichern</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Projekt-Dropdown -->
-      <div>
-        <div class="section-label">Projekt (optional)</div>
-        <select id="projectSelect">
-          <option value="">— Kein Projekt —</option>
-        </select>
-      </div>
-
-      <!-- Status-Box -->
-      <div class="status" id="status"></div>
-
-      <!-- Haupt-Button -->
-      <button class="primary-btn" id="saveBtn" disabled>
-        <span>💾</span>
-        <span id="saveBtnText">Email wird geladen…</span>
+      <!-- Step 1: read the current email -->
+      <button class="primary-btn" id="readBtn">
+        <span>📧</span>
+        <span id="readBtnText">Read email</span>
       </button>
 
+      <!-- Step 2: editable preview + targeting (hidden until read) -->
+      <div id="previewArea" style="display:none; flex-direction:column; gap:12px; margin-top:12px;">
+
+        <!-- Meta (read-only) -->
+        <div class="email-card visible" id="emailCard">
+          <div class="email-card-from" id="emailFrom">–</div>
+          <div class="email-card-meta" id="emailMeta"></div>
+        </div>
+
+        <!-- Editable subject -->
+        <div>
+          <div class="section-label">Subject</div>
+          <input type="text" id="emailSubjectInput" placeholder="Subject…"/>
+        </div>
+
+        <!-- Editable body -->
+        <div>
+          <div class="section-label">Body</div>
+          <textarea id="emailBodyInput" rows="6" placeholder="Email body…"></textarea>
+        </div>
+
+        <!-- Contact matching -->
+        <div>
+          <div class="section-label">Contact</div>
+
+          <div class="match-result" id="matchResult">
+            <div class="match-name" id="matchName"></div>
+            <div class="match-email" id="matchEmail"></div>
+            <button class="secondary-btn" id="matchClearBtn" style="margin-top:6px">Choose another contact</button>
+          </div>
+
+          <div id="contactSearch" style="display:none">
+            <input type="search" id="contactSearchInput" placeholder="Search name or email…" autocomplete="off"/>
+            <div class="search-results" id="searchResults"></div>
+            <div style="margin-top:5px; font-size:11px; color:var(--text-dim)">
+              No matching contact?
+              <button class="secondary-btn" id="skipContactBtn" style="width:auto; display:inline; padding:2px 8px; font-size:11px; margin-left:4px">Save without contact</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Project -->
+        <div>
+          <div class="section-label">Project (optional)</div>
+          <select id="projectSelect">
+            <option value="">— No project —</option>
+          </select>
+        </div>
+
+        <!-- Stage / Status (only when project + contact chosen) -->
+        <div id="stageStatusArea" style="display:none">
+          <div class="section-label">Stage / Status</div>
+          <div id="stageStatusHint" style="font-size:11px; color:var(--text-dim); margin-bottom:6px; display:none"></div>
+          <select id="stageSelect">
+            <option value="">— Stage —</option>
+          </select>
+          <select id="statusSelect" style="margin-top:8px" disabled>
+            <option value="">— Status —</option>
+          </select>
+        </div>
+
+        <!-- Status box -->
+        <div class="status" id="status"></div>
+
+        <!-- Step 3: send -->
+        <button class="primary-btn" id="saveBtn" disabled>
+          <span>💾</span>
+          <span id="saveBtnText">Send to Database</span>
+        </button>
+
+      </div>
     </div>
   </div>
 
   <!-- ── Settings ── -->
   <div class="body" style="padding-top:0">
-    <button class="settings-toggle" id="settingsToggle">⚙ Einstellungen</button>
+    <button class="settings-toggle" id="settingsToggle">⚙ Settings</button>
     <div class="settings-panel" id="settingsPanel">
 
       <div class="settings-row">
@@ -116,20 +147,20 @@
       </div>
 
       <div class="settings-row">
-        <label>Login — Passwort</label>
+        <label>Login — Password</label>
         <input type="password" id="settingsPassword" placeholder="••••••••"/>
       </div>
 
       <div class="status" id="settingsStatus"></div>
 
-      <button class="settings-save-btn" id="settingsSaveBtn">Speichern &amp; Einloggen</button>
+      <button class="settings-save-btn" id="settingsSaveBtn">Save &amp; Log in</button>
     </div>
   </div>
 
   <!-- ── Footer ── -->
   <div class="footer">
     <span>Thronsberg © 2026</span>
-    <span>v1.0 · email-to-supabase</span>
+    <span>v1.1 · email-to-supabase</span>
   </div>
 
   <script src="taskpane.js"></script>

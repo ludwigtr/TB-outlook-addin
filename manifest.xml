@@ -8,7 +8,7 @@
 
   <!-- Eindeutige Add-in-ID (GUID) -->
   <Id>7f3a9d2e-b5c1-4f8a-9e0d-3a6b2c4d1e5f</Id>
-  <Version>1.0.0</Version>
+  <Version>1.1.0</Version>
   <ProviderName>Thronsberg</ProviderName>
   <DefaultLocale>de-DE</DefaultLocale>
   <DisplayName DefaultValue="Email to Supabase"/>
@@ -115,7 +115,7 @@
       </bt:ShortStrings>
 
       <bt:LongStrings>
-        <bt:String id="SaveBtnDesc" DefaultValue="Speichert diese Email in der Thronsberg-Datenbank (email_activities)."/>
+        <bt:String id="SaveBtnDesc" DefaultValue="Speichert diese Email in der Thronsberg-Datenbank (activities) und optional einen Stage/Status-Wechsel."/>
       </bt:LongStrings>
     </Resources>
 

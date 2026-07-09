@@ -1,7 +1,24 @@
 /**
  * taskpane.js — Thronsberg Email to Supabase Add-in
- * Eine einzige Datei — Supabase-Logik und UI-Logik sind direkt hier drin.
+ * Flow: Read email → editable preview → pick contact/project/stage/status → Send to Database.
+ * The (possibly edited) email is stored in `activities` (permanent log). If a project is
+ * selected and stage/status actually change, apply_status_change() also writes a status_changes
+ * row with the subject -> reason_header and the body -> reason_footer (editable later in the app).
  */
+
+// ── Stage / Status options (mirror of src/lib/pipeline-options.ts in the frontend) ──────────
+
+var STAGES = ["Search", "Contacted", "Shortlist", "CV Sent", "Interview", "Offer", "Placed"];
+
+var STAGE_STATUSES = {
+  "Search":    ["Search ID", "Direct Application", "Decline", "Info Call", "Info Mail", "Info F2F", "Info LinkedIn", "Absage"],
+  "Contacted": ["Cand to Call", "Cand to Call (E)", "Cand to Call (L)", "Int Cons", "Absage"],
+  "Shortlist": ["Cand Feedback", "CV 2B Sent", "CV SL Select", "CV T-Style", "CV Ready", "Absage"],
+  "CV Sent":   ["CV Sent", "Invited", "Client: On Hold", "Absage"],
+  "Interview": ["Interview", "Absage"],
+  "Offer":     ["References", "Offer", "Absage"],
+  "Placed":    ["Offer Accepted"],
+};
 
 // ── Supabase REST-Client (inline) ────────────────────────────────────────────
 
@@ -27,7 +44,7 @@ async function sbLogin(email, password) {
     body: JSON.stringify({ email: email, password: password }),
   });
   var data = await res.json();
-  if (!res.ok) throw new Error(data.error_description || data.message || 'Auth-Fehler ' + res.status);
+  if (!res.ok) throw new Error(data.error_description || data.message || 'Auth error ' + res.status);
   _sbToken   = data.access_token;
   _sbRefresh = data.refresh_token;
   _sbUserId  = (data.user && data.user.id) || '';
@@ -35,22 +52,22 @@ async function sbLogin(email, password) {
 }
 
 async function sbRefreshToken() {
-  if (!_sbRefresh) throw new Error('Kein Refresh-Token — bitte neu einloggen.');
+  if (!_sbRefresh) throw new Error('No refresh token — please log in again.');
   var res = await fetch(_sbUrl + '/auth/v1/token?grant_type=refresh_token', {
     method: 'POST',
     headers: { 'apikey': _sbAnon, 'Content-Type': 'application/json' },
     body: JSON.stringify({ refresh_token: _sbRefresh }),
   });
   var data = await res.json();
-  if (!res.ok) { _sbToken = ''; _sbRefresh = ''; persistRefreshToken(); throw new Error('Session abgelaufen — bitte neu einloggen.'); }
+  if (!res.ok) { _sbToken = ''; _sbRefresh = ''; persistRefreshToken(); throw new Error('Session expired — please log in again.'); }
   _sbToken   = data.access_token;
   _sbRefresh = data.refresh_token;
   _sbUserId  = (data.user && data.user.id) || _sbUserId;
   persistRefreshToken();
 }
 
-// Speichert das aktuelle Refresh-Token in den roamingSettings (überlebt App-Neustarts).
-// Supabase rotiert das Token bei jeder Erneuerung — wir müssen das jeweils neue ablegen.
+// Persists the current refresh token in roamingSettings (survives app restarts).
+// Supabase rotates the token on every refresh — we must store the new one each time.
 function persistRefreshToken() {
   var s = Office.context.roamingSettings;
   s.set('refresh_token', _sbRefresh || '');
@@ -66,7 +83,7 @@ function sbHeaders(extra) {
 async function sbSelect(path) {
   var res = await fetch(_sbUrl + '/rest/v1' + path, { headers: sbHeaders() });
   if (res.status === 401) { await sbRefreshToken(); return sbSelect(path); }
-  if (!res.ok) { var e = await res.json().catch(function(){ return {}; }); throw new Error(e.message || 'DB-Fehler ' + res.status); }
+  if (!res.ok) { var e = await res.json().catch(function(){ return {}; }); throw new Error(e.message || 'DB error ' + res.status); }
   return res.json();
 }
 
@@ -77,12 +94,25 @@ async function sbInsert(table, payload) {
     body: JSON.stringify(payload),
   });
   if (res.status === 401) { await sbRefreshToken(); return sbInsert(table, payload); }
-  if (!res.ok) { var e = await res.json().catch(function(){ return {}; }); throw new Error(e.message || 'Insert-Fehler ' + res.status + ': ' + (e.details || e.hint || '')); }
+  if (!res.ok) { var e = await res.json().catch(function(){ return {}; }); throw new Error(e.message || 'Insert error ' + res.status + ': ' + (e.details || e.hint || '')); }
   var rows = await res.json();
   return Array.isArray(rows) ? rows[0] : rows;
 }
 
-// ── DOM-Helfer ───────────────────────────────────────────────────────────────
+// Calls a Postgres function (RPC). Returns parsed JSON when present, else null.
+async function sbRpc(fn, args) {
+  var res = await fetch(_sbUrl + '/rest/v1/rpc/' + fn, {
+    method: 'POST',
+    headers: sbHeaders(),
+    body: JSON.stringify(args || {}),
+  });
+  if (res.status === 401) { await sbRefreshToken(); return sbRpc(fn, args); }
+  if (!res.ok) { var e = await res.json().catch(function(){ return {}; }); throw new Error(e.message || 'RPC error ' + res.status + ': ' + (e.details || e.hint || '')); }
+  var text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+// ── DOM helpers ────────────────────────────────────────────────────────────
 
 function $(id) { return document.getElementById(id); }
 
@@ -98,11 +128,13 @@ function hideStatus(target) {
   el.textContent = '';
 }
 
-// ── Globaler Zustand ─────────────────────────────────────────────────────────
+// ── Global state ─────────────────────────────────────────────────────────────
 
-var emailData      = null;
+var emailData      = null;   // { from, to, cc, subject, date, body, received }
 var matchedContact = null;
 var isSaving       = false;
+// Current stage/status of the matched contact on the selected project (null if not linked).
+var currentLink    = null;   // { stage, status } or null when no contacts_projects row exists
 
 // ── Office.onReady ───────────────────────────────────────────────────────────
 
@@ -118,9 +150,7 @@ Office.onReady(function() {
     _sbRefresh = cfg.refresh;
     sbRefreshToken().then(function() {
       show('readyContent');
-      setStatus('loading', '⏳ Email wird geladen…');
-      $('saveBtn').disabled = true;
-      Promise.all([loadEmailData(), loadProjects()]);
+      loadProjects();
     }).catch(function() {
       show('notLoggedIn');
     });
@@ -144,7 +174,7 @@ function loadSettingsToForm() {
   var cfg = getSavedConfig();
   $('settingsUrl').value  = cfg.url;
   $('settingsAnon').value = cfg.anon;
-  // Email + Passwort werden nie gespeichert — Felder bleiben leer und dienen nur dem Login.
+  // Email + password are never stored — fields stay empty and are only used to log in.
 }
 
 $('settingsToggle').addEventListener('click', function() {
@@ -158,12 +188,12 @@ $('settingsSaveBtn').addEventListener('click', function() {
   var password = $('settingsPassword').value;
 
   if (!url || !anon || !email || !password) {
-    setStatus('error', '✗ Alle Felder ausfüllen.', 'settingsStatus');
+    setStatus('error', '✗ Please fill in all fields.', 'settingsStatus');
     return;
   }
 
   $('settingsSaveBtn').disabled = true;
-  setStatus('loading', '⏳ Verbindung wird getestet…', 'settingsStatus');
+  setStatus('loading', '⏳ Testing connection…', 'settingsStatus');
 
   sbInit(url, anon);
   sbLogin(email, password).then(function() {
@@ -171,15 +201,14 @@ $('settingsSaveBtn').addEventListener('click', function() {
     s.set('supabase_url',      url);
     s.set('supabase_anon_key', anon);
     s.set('refresh_token',     _sbRefresh);
-    // Passwort wird NICHT gespeichert. Alte Klartext-Felder aus früheren Versionen aktiv leeren.
     s.set('login_email',       '');
     s.set('login_password',    '');
     s.saveAsync(function(r) {
       if (r.status === Office.AsyncResultStatus.Succeeded) {
         $('settingsPassword').value = '';
-        setStatus('success', '✓ Gespeichert und eingeloggt. Task Pane schließen und neu öffnen.', 'settingsStatus');
+        setStatus('success', '✓ Saved and logged in. Close the task pane and reopen it.', 'settingsStatus');
       } else {
-        setStatus('error', '✗ Speichern fehlgeschlagen.', 'settingsStatus');
+        setStatus('error', '✗ Save failed.', 'settingsStatus');
       }
       $('settingsSaveBtn').disabled = false;
     });
@@ -189,7 +218,7 @@ $('settingsSaveBtn').addEventListener('click', function() {
   });
 });
 
-// ── Zustand wechseln ─────────────────────────────────────────────────────────
+// ── Switch state ──────────────────────────────────────────────────────────────
 
 function show(sectionId) {
   ['notReady', 'notConfigured', 'notLoggedIn', 'readyContent'].forEach(function(id) {
@@ -197,7 +226,17 @@ function show(sectionId) {
   });
 }
 
-// ── Email lesen ──────────────────────────────────────────────────────────────
+// ── Step 1: Read email ─────────────────────────────────────────────────────────
+
+$('readBtn').addEventListener('click', function() {
+  $('readBtn').disabled = true;
+  $('readBtnText').textContent = 'Reading…';
+  setStatus('loading', '⏳ Reading email…');
+  loadEmailData().then(function() {
+    $('readBtnText').textContent = 'Re-read email';
+    $('readBtn').disabled = false;
+  });
+});
 
 function loadEmailData() {
   return new Promise(function(resolve) {
@@ -220,38 +259,37 @@ function loadEmailData() {
           body = result.value || '';
         }
 
-        var subject  = item.subject || '';
-        var date     = item.dateTimeCreated ? new Date(item.dateTimeCreated).toISOString() : new Date().toISOString();
-        var toStr    = toList.map(function(r) { return r.name ? r.name + ' <' + r.address + '>' : r.address; }).join(', ');
-        var ccStr    = ccList.map(function(r) { return r.name ? r.name + ' <' + r.address + '>' : r.address; }).join(', ');
-        var fromStr  = from.name ? from.name + ' <' + from.address + '>' : from.address;
-        var header   = 'From: ' + fromStr + '\nTo: ' + toStr + (ccStr ? '\nCc: ' + ccStr : '') + '\nSubject: ' + subject + '\nDate: ' + date;
+        var subject = item.subject || '';
+        var date    = item.dateTimeCreated ? new Date(item.dateTimeCreated).toISOString() : new Date().toISOString();
 
-        emailData = { from: from, to: toList, cc: ccList, subject: subject, date: date, body: body, received: received, header: header };
+        emailData = { from: from, to: toList, cc: ccList, subject: subject, date: date, body: body, received: received };
 
-        renderEmailCard();
+        $('previewArea').style.display = 'flex';
+        renderMeta();
+        $('emailSubjectInput').value = subject;
+        $('emailBodyInput').value    = body;
+        hideStatus();
+
         matchContact().then(function() {
-          enableSaveBtn();
           resolve();
         });
       });
     } catch(err) {
-      setStatus('error', '✗ Email konnte nicht geladen werden: ' + err.message);
+      setStatus('error', '✗ Could not read email: ' + err.message);
+      $('readBtn').disabled = false;
+      $('readBtnText').textContent = 'Read email';
       resolve();
     }
   });
 }
 
-function renderEmailCard() {
+function renderMeta() {
   if (!emailData) return;
-  $('emailCard').classList.add('visible');
-  $('emailFrom').textContent    = emailData.from.name || emailData.from.address;
-  $('emailSubject').textContent = emailData.subject || '(kein Betreff)';
-
+  $('emailFrom').textContent = emailData.from.name || emailData.from.address || '(unknown sender)';
   var meta = $('emailMeta');
   meta.innerHTML = '';
-  [emailData.received ? '📥 Eingehend' : '📤 Ausgehend',
-   new Date(emailData.date).toLocaleDateString('de-DE')].forEach(function(t) {
+  [emailData.received ? '📥 Inbound' : '📤 Outbound',
+   new Date(emailData.date).toLocaleDateString('en-GB')].forEach(function(t) {
     var span = document.createElement('span');
     span.className = 'meta-tag';
     span.textContent = t;
@@ -259,43 +297,54 @@ function renderEmailCard() {
   });
 }
 
-// ── Kontakt-Matching ─────────────────────────────────────────────────────────
+// Builds the composed header block for `activities.email_header`, using the (edited) subject.
+function buildHeader() {
+  var fromStr = emailData.from.name ? emailData.from.name + ' <' + emailData.from.address + '>' : emailData.from.address;
+  var toStr   = emailData.to.map(function(r) { return r.name ? r.name + ' <' + r.address + '>' : r.address; }).join(', ');
+  var ccStr   = emailData.cc.map(function(r) { return r.name ? r.name + ' <' + r.address + '>' : r.address; }).join(', ');
+  var subject = $('emailSubjectInput').value;
+  return 'From: ' + fromStr + '\nTo: ' + toStr + (ccStr ? '\nCc: ' + ccStr : '') + '\nSubject: ' + subject + '\nDate: ' + emailData.date;
+}
+
+// ── Contact matching ────────────────────────────────────────────────────────
 
 function matchContact() {
   if (!emailData) return Promise.resolve();
 
   var addr = emailData.received ? emailData.from.address : ((emailData.to[0] && emailData.to[0].address) || '');
-  if (!addr) { showContactSearch(); return Promise.resolve(); }
+  if (!addr) { showContactSearch(); enableSaveBtn(); return Promise.resolve(); }
 
-  setStatus('loading', '⏳ Kontakt wird gesucht (' + addr + ')…');
+  setStatus('loading', '⏳ Looking up contact (' + addr + ')…');
 
   return sbSelect('/contacts?email=ilike.' + encodeURIComponent(addr) + '&select=contact_id,first_name,last_name,email&limit=5')
     .then(function(rows) {
       if (rows.length === 1) {
-        matchedContact = rows[0];
         showMatchResult(rows[0]);
         hideStatus();
       } else if (rows.length > 1) {
-        setStatus('warning', '⚠ ' + rows.length + ' Kontakte gefunden — bitte auswählen.');
+        setStatus('warning', '⚠ ' + rows.length + ' contacts found — please choose.');
         showContactSearch(rows);
       } else {
-        setStatus('warning', '⚠ Kein Kontakt für „' + addr + '" gefunden.');
+        setStatus('warning', '⚠ No contact found for “' + addr + '”.');
         showContactSearch();
       }
+      enableSaveBtn();
     })
     .catch(function(err) {
-      setStatus('warning', '⚠ Kontakt-Suche fehlgeschlagen: ' + err.message);
+      setStatus('warning', '⚠ Contact lookup failed: ' + err.message);
       showContactSearch();
+      enableSaveBtn();
     });
 }
 
 function showMatchResult(contact) {
   matchedContact = contact;
-  var fullName = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || '(kein Name)';
+  var fullName = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || '(no name)';
   $('matchName').textContent  = fullName;
   $('matchEmail').textContent = contact.email || '';
   $('matchResult').classList.add('visible');
   $('contactSearch').style.display = 'none';
+  refreshStageStatus();
 }
 
 function showContactSearch(preload) {
@@ -309,13 +358,15 @@ $('matchClearBtn').addEventListener('click', function() {
   $('matchResult').classList.remove('visible');
   $('contactSearch').style.display = '';
   $('contactSearchInput').focus();
+  refreshStageStatus();
 });
 
 $('skipContactBtn').addEventListener('click', function() {
   matchedContact = null;
   $('contactSearch').style.display = 'none';
   $('matchResult').classList.remove('visible');
-  setStatus('warning', '⚠ Wird ohne Kontakt gespeichert.');
+  setStatus('warning', '⚠ Will be saved without a contact.');
+  refreshStageStatus();
 });
 
 var searchTimer = null;
@@ -340,12 +391,12 @@ function renderSearchItems(rows) {
   if (!rows.length) {
     var d = document.createElement('div');
     d.className = 'search-no-result';
-    d.textContent = 'Keine Treffer gefunden.';
+    d.textContent = 'No matches found.';
     container.appendChild(d);
     return;
   }
   rows.forEach(function(c) {
-    var fullName = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(kein Name)';
+    var fullName = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
 
     var div = document.createElement('div');
     div.className = 'search-item';
@@ -365,7 +416,7 @@ function renderSearchItems(rows) {
   });
 }
 
-// ── Projekte laden ───────────────────────────────────────────────────────────
+// ── Projects ─────────────────────────────────────────────────────────────────
 
 function loadProjects() {
   return sbSelect('/projects?select=project_id,job_name&order=job_name')
@@ -381,50 +432,154 @@ function loadProjects() {
     .catch(function() {});
 }
 
-function enableSaveBtn() {
-  $('saveBtn').disabled = false;
-  $('saveBtnText').textContent = 'In Datenbank speichern';
+$('projectSelect').addEventListener('change', refreshStageStatus);
+
+// ── Stage / Status ─────────────────────────────────────────────────────────────
+
+// Fills the stage dropdown once.
+(function initStageOptions() {
+  var sel = $('stageSelect');
+  STAGES.forEach(function(s) {
+    var opt = document.createElement('option');
+    opt.value = s; opt.textContent = s;
+    sel.appendChild(opt);
+  });
+})();
+
+// Repopulates the status dropdown for a given stage, optionally preselecting a value.
+function fillStatusOptions(stage, selected) {
+  var sel = $('statusSelect');
+  sel.innerHTML = '<option value="">— Status —</option>';
+  var list = (stage && STAGE_STATUSES[stage]) ? STAGE_STATUSES[stage] : [];
+  list.forEach(function(s) {
+    var opt = document.createElement('option');
+    opt.value = s; opt.textContent = s;
+    if (s === selected) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  sel.disabled = !stage;
 }
 
-// ── Speichern ────────────────────────────────────────────────────────────────
+// When the user changes the stage manually, reset the status (mirrors the app).
+$('stageSelect').addEventListener('change', function() {
+  fillStatusOptions($('stageSelect').value, null);
+});
 
-$('saveBtn').addEventListener('click', function() {
-  if (isSaving) return;
-  isSaving = true;
-  $('saveBtn').disabled = true;
-  $('saveBtnText').textContent = 'Wird gespeichert…';
-  setStatus('loading', '⏳ Datensatz wird angelegt…');
+// Loads the current stage/status of the matched contact on the selected project and prefills.
+function refreshStageStatus() {
+  var projectId = $('projectSelect').value;
+  var area = $('stageStatusArea');
+  var hint = $('stageStatusHint');
+  currentLink = null;
 
-  if (!emailData) {
-    setStatus('error', '✗ Email-Daten fehlen — Task Pane schließen und neu öffnen.');
-    isSaving = false;
-    $('saveBtn').disabled = false;
-    $('saveBtnText').textContent = 'Erneut versuchen';
+  if (!projectId || !matchedContact) {
+    area.style.display = 'none';
     return;
   }
 
+  area.style.display = '';
+  hint.style.display = 'none';
+  $('stageSelect').value = '';
+  fillStatusOptions('', null);
+
+  sbSelect('/contacts_projects?contact_id=eq.' + encodeURIComponent(matchedContact.contact_id) +
+           '&project_id=eq.' + encodeURIComponent(projectId) +
+           '&select=stage,status&limit=1')
+    .then(function(rows) {
+      if (rows && rows.length) {
+        currentLink = { stage: rows[0].stage || '', status: rows[0].status || '' };
+        $('stageSelect').value = currentLink.stage;
+        fillStatusOptions(currentLink.stage, currentLink.status);
+      } else {
+        // Candidate is not on this project — stage/status can't be changed from here.
+        currentLink = null;
+        $('stageSelect').value = '';
+        $('stageSelect').disabled = true;
+        $('statusSelect').disabled = true;
+        hint.textContent = 'This candidate is not on the selected project — the email will be saved, but stage/status can only be set once they are added to the project.';
+        hint.style.display = '';
+      }
+    })
+    .catch(function() {
+      area.style.display = 'none';
+    });
+}
+
+function enableSaveBtn() {
+  $('saveBtn').disabled = false;
+  $('saveBtnText').textContent = 'Send to Database';
+}
+
+// ── Step 3: Send ────────────────────────────────────────────────────────────
+
+$('saveBtn').addEventListener('click', function() {
+  if (isSaving) return;
+  if (!emailData) {
+    setStatus('error', '✗ No email loaded — click “Read email” first.');
+    return;
+  }
+
+  isSaving = true;
+  $('saveBtn').disabled = true;
+  $('saveBtnText').textContent = 'Sending…';
+  setStatus('loading', '⏳ Saving…');
+
+  var projectId = $('projectSelect').value || null;
+  var subject   = $('emailSubjectInput').value;
+  var body      = $('emailBodyInput').value;
+
   var payload = {
     contact_id:   (matchedContact && matchedContact.contact_id) || null,
-    project_id:   $('projectSelect').value || null,
+    project_id:   projectId,
     user_id:      sbGetUserId() || null,
-    email_body:   emailData.body,
+    email_body:   body,
     received:     emailData.received,
-    email_header: emailData.header,
+    email_header: buildHeader(),
   };
 
-  sbInsert('email_activities', payload).then(function(result) {
-    var contactLabel = matchedContact
-      ? ([matchedContact.first_name, matchedContact.last_name].filter(Boolean).join(' ') || matchedContact.email)
-      : 'kein Kontakt';
-    var projectOpt = $('projectSelect').selectedOptions[0];
-    var projectLabel = (projectOpt && projectOpt.text !== '— Kein Projekt —') ? projectOpt.text : 'kein Projekt';
-    setStatus('success', '✓ Gespeichert\nKontakt: ' + contactLabel + '\nProjekt: ' + projectLabel + '\nID: ' + ((result && result.email_activity_id && result.email_activity_id.slice(0, 8)) || '…'));
-    $('saveBtnText').textContent = 'Erneut speichern';
-  }).catch(function(err) {
-    setStatus('error', '✗ Fehler: ' + err.message);
-    $('saveBtnText').textContent = 'Erneut versuchen';
-  }).finally(function() {
-    isSaving = false;
-    $('saveBtn').disabled = false;
-  });
+  // Decide whether a status/stage change should be logged.
+  var newStage  = $('stageSelect').value || null;
+  var newStatus = $('statusSelect').value || null;
+  var doStatusChange =
+    projectId &&
+    matchedContact &&
+    currentLink &&                                   // candidate is linked to the project
+    ((newStage || '') !== (currentLink.stage || '') ||
+     (newStatus || '') !== (currentLink.status || ''));
+
+  sbInsert('activities', payload)
+    .then(function(result) {
+      if (!doStatusChange) return { changed: false };
+      // Send both stage and status (current-or-edited) so the trigger logs only real diffs.
+      return sbRpc('apply_status_change', {
+        p_contact_id:    matchedContact.contact_id,
+        p_project_id:    projectId,
+        p_stage:         newStage,
+        p_status:        newStatus,
+        p_reason_header: subject,   // subject only -> reason_header
+        p_reason_footer: body,      // body -> reason_footer
+      }).then(function() { return { changed: true }; });
+    })
+    .then(function(outcome) {
+      var contactLabel = matchedContact
+        ? ([matchedContact.first_name, matchedContact.last_name].filter(Boolean).join(' ') || matchedContact.email)
+        : 'no contact';
+      var projectOpt = $('projectSelect').selectedOptions[0];
+      var projectLabel = (projectId && projectOpt) ? projectOpt.text : 'no project';
+      var changeLine = outcome.changed
+        ? ('Stage/Status: ' + ($('stageSelect').value || '—') + ' · ' + ($('statusSelect').value || '—'))
+        : 'No stage/status change';
+      setStatus('success', '✓ Saved\nContact: ' + contactLabel + '\nProject: ' + projectLabel + '\n' + changeLine);
+      $('saveBtnText').textContent = 'Send again';
+      // Refresh the cached current link so a second send doesn't re-log the same change.
+      if (outcome.changed) currentLink = { stage: $('stageSelect').value || '', status: $('statusSelect').value || '' };
+    })
+    .catch(function(err) {
+      setStatus('error', '✗ Error: ' + err.message);
+      $('saveBtnText').textContent = 'Try again';
+    })
+    .finally(function() {
+      isSaving = false;
+      $('saveBtn').disabled = false;
+    });
 });
