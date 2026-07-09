@@ -8,7 +8,7 @@
 
   <!-- Eindeutige Add-in-ID (GUID) -->
   <Id>7f3a9d2e-b5c1-4f8a-9e0d-3a6b2c4d1e5f</Id>
-  <Version>1.1.0</Version>
+  <Version>1.1.1</Version>
   <ProviderName>Thronsberg</ProviderName>
   <DefaultLocale>de-DE</DefaultLocale>
   <DisplayName DefaultValue="Email to Supabase"/>
@@ -37,7 +37,7 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/taskpane.html"/>
+        <SourceLocation DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/taskpane.html?v=2"/>
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -105,7 +105,7 @@
 
       <bt:Urls>
         <bt:Url id="Commands.Url"  DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/commands.html"/>
-        <bt:Url id="Taskpane.Url"  DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/taskpane.html"/>
+        <bt:Url id="Taskpane.Url"  DefaultValue="https://ludwigtr.github.io/TB-outlook-addin/taskpane.html?v=2"/>
       </bt:Urls>
 
       <bt:ShortStrings>
