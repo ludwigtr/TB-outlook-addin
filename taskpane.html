@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Thronsberg — Save Email</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
-  <link rel="stylesheet" href="styles.css?v=2"/>
+  <link rel="stylesheet" href="styles.css?v=3"/>
 </head>
 <body>
 
@@ -73,21 +73,35 @@
 
         <!-- Contact matching -->
         <div>
-          <div class="section-label">Contact</div>
-
-          <div class="match-result" id="matchResult">
-            <div class="match-name" id="matchName"></div>
-            <div class="match-email" id="matchEmail"></div>
-            <button class="secondary-btn" id="matchClearBtn" style="margin-top:6px">Choose another contact</button>
+          <div class="section-label" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+            <span id="contactSectionLabel">Contact</span>
+            <button class="mode-toggle-btn" id="bulkModeToggle" type="button">Apply to multiple candidates</button>
           </div>
 
-          <div id="contactSearch" style="display:none">
-            <input type="search" id="contactSearchInput" placeholder="Search name or email…" autocomplete="off"/>
-            <div class="search-results" id="searchResults"></div>
-            <div style="margin-top:5px; font-size:11px; color:var(--text-dim)">
-              No matching contact?
-              <button class="secondary-btn" id="skipContactBtn" style="width:auto; display:inline; padding:2px 8px; font-size:11px; margin-left:4px">Save without contact</button>
+          <!-- Single-candidate mode (default) -->
+          <div id="singleContactMode">
+            <div class="match-result" id="matchResult">
+              <div class="match-name" id="matchName"></div>
+              <div class="match-email" id="matchEmail"></div>
+              <button class="secondary-btn" id="matchClearBtn" style="margin-top:6px">Choose another contact</button>
             </div>
+
+            <div id="contactSearch" style="display:none">
+              <input type="search" id="contactSearchInput" placeholder="Search name or email…" autocomplete="off"/>
+              <div class="search-results" id="searchResults"></div>
+              <div style="margin-top:5px; font-size:11px; color:var(--text-dim)">
+                No matching contact?
+                <button class="secondary-btn" id="skipContactBtn" style="width:auto; display:inline; padding:2px 8px; font-size:11px; margin-left:4px">Save without contact</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bulk mode: select several candidates, same email + same target stage/status for all -->
+          <div id="bulkContactMode" style="display:none">
+            <input type="search" id="bulkSearchInput" placeholder="Search name or email…" autocomplete="off"/>
+            <div class="search-results" id="bulkSearchResults"></div>
+            <div class="chip-list" id="bulkSelectedList"></div>
+            <div style="margin-top:5px; font-size:11px; color:var(--text-dim)" id="bulkSelectedHint">No candidates selected yet.</div>
           </div>
         </div>
 
@@ -160,9 +174,9 @@
   <!-- ── Footer ── -->
   <div class="footer">
     <span>Thronsberg © 2026</span>
-    <span>v1.1 · email-to-supabase</span>
+    <span>v1.2 · email-to-supabase</span>
   </div>
 
-  <script src="taskpane.js?v=2"></script>
+  <script src="taskpane.js?v=3"></script>
 </body>
 </html>

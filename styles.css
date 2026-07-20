@@ -92,6 +92,48 @@ html, body {
 .match-name { color: var(--gold); font-weight: 600; }
 .match-email { color: var(--text-dim); font-size: 11px; }
 
+/* ── Mode toggle (single ↔ multiple candidates) ── */
+.mode-toggle-btn {
+  width: auto;
+  padding: 3px 9px;
+  font-size: 10.5px;
+  background: none;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.mode-toggle-btn:hover { border-color: rgba(255,255,255,0.2); color: var(--text); }
+
+/* ── Bulk-Kandidaten-Chips ── */
+.chip-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--gold-bg);
+  border: 1px solid var(--gold-bdr);
+  border-radius: 5px;
+  padding: 3px 6px 3px 9px;
+  font-size: 11px;
+  color: var(--gold);
+}
+.chip-remove {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px;
+  opacity: 0.7;
+  font-family: inherit;
+}
+.chip-remove:hover { opacity: 1; }
+
 /* ── Inputs / Select ── */
 input[type="text"], input[type="email"], input[type="password"],
 input[type="search"], select, textarea {

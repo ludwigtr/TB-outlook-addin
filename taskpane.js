@@ -1,9 +1,16 @@
 /**
  * taskpane.js — Thronsberg Email to Supabase Add-in
- * Flow: Read email → editable preview → pick contact/project/stage/status → Send to Database.
- * The (possibly edited) email is stored in `activities` (permanent log). If a project is
- * selected and stage/status actually change, apply_status_change() also writes a status_changes
- * row with the subject -> reason_header and the body -> reason_footer (editable later in the app).
+ * Flow: Read email → editable preview → pick contact(s)/project/stage/status → Send to Database.
+ * The (possibly edited) email is stored in `activities` (permanent log) — one row per contact.
+ * If a project is selected and stage/status actually change, apply_status_change() also writes
+ * a status_changes row linked to that email via activity_id (reason_header/footer stay empty;
+ * the app timeline falls back to showing the linked email as the reason).
+ *
+ * Two modes, both sharing the same email/project/stage/status controls below:
+ *  - Single candidate (default): auto-match by sender address, or search/pick one contact.
+ *  - Bulk ("Apply to multiple candidates"): search and pick several contacts; the same email
+ *    gets logged for each, and the same target stage/status is applied to whichever of them
+ *    are already on the selected project (see saveBulk()).
  */
 
 // ── Stage / Status options (mirror of src/lib/pipeline-options.ts in the frontend) ──────────
@@ -135,6 +142,11 @@ var matchedContact = null;
 var isSaving       = false;
 // Current stage/status of the matched contact on the selected project (null if not linked).
 var currentLink    = null;   // { stage, status } or null when no contacts_projects row exists
+
+// Bulk mode: apply the same email + target stage/status to several candidates at once
+// (e.g. "client wants to meet these 5" — pick them, set the stage/status, done).
+var bulkMode       = false;
+var bulkContacts   = [];     // [{ contact_id, first_name, last_name, email }]
 
 // ── Office.onReady ───────────────────────────────────────────────────────────
 
@@ -416,6 +428,114 @@ function renderSearchItems(rows) {
   });
 }
 
+// ── Bulk mode (multiple candidates, one email, one target stage/status) ────────
+
+$('bulkModeToggle').addEventListener('click', function() {
+  bulkMode = !bulkMode;
+  $('singleContactMode').style.display = bulkMode ? 'none' : '';
+  $('bulkContactMode').style.display   = bulkMode ? '' : 'none';
+  $('bulkModeToggle').textContent      = bulkMode ? '← Back to single candidate' : 'Apply to multiple candidates';
+  $('contactSectionLabel').textContent = bulkMode ? 'Candidates (multiple)' : 'Contact';
+
+  // Switching modes always starts clean — no mixing a single match with a bulk list.
+  matchedContact = null;
+  $('matchResult').classList.remove('visible');
+  $('contactSearch').style.display = '';
+  bulkContacts = [];
+  renderBulkSelected();
+  $('bulkSearchInput').value = '';
+  $('bulkSearchResults').classList.remove('visible');
+  $('bulkSearchResults').innerHTML = '';
+
+  refreshStageStatus();
+});
+
+var bulkSearchTimer = null;
+$('bulkSearchInput').addEventListener('input', function() {
+  clearTimeout(bulkSearchTimer);
+  var q = $('bulkSearchInput').value.trim();
+  if (q.length < 2) { $('bulkSearchResults').classList.remove('visible'); $('bulkSearchResults').innerHTML = ''; return; }
+  bulkSearchTimer = setTimeout(function() { runBulkContactSearch(q); }, 280);
+});
+
+function runBulkContactSearch(q) {
+  var enc = encodeURIComponent('*' + q + '*');
+  sbSelect('/contacts?or=(first_name.ilike.' + enc + ',last_name.ilike.' + enc + ',email.ilike.' + enc + ')&select=contact_id,first_name,last_name,email&limit=20')
+    .then(renderBulkSearchItems)
+    .catch(function() {});
+  $('bulkSearchResults').classList.add('visible');
+}
+
+function renderBulkSearchItems(rows) {
+  var container = $('bulkSearchResults');
+  container.innerHTML = '';
+
+  var already = {};
+  bulkContacts.forEach(function(c) { already[c.contact_id] = true; });
+  var filtered = rows.filter(function(c) { return !already[c.contact_id]; });
+
+  if (!filtered.length) {
+    var d = document.createElement('div');
+    d.className = 'search-no-result';
+    d.textContent = rows.length ? 'Already selected.' : 'No matches found.';
+    container.appendChild(d);
+    return;
+  }
+
+  filtered.forEach(function(c) {
+    var fullName = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
+
+    var div = document.createElement('div');
+    div.className = 'search-item';
+
+    var nameDiv = document.createElement('div');
+    nameDiv.className = 'search-item-name';
+    nameDiv.textContent = fullName;
+
+    var emailDiv = document.createElement('div');
+    emailDiv.className = 'search-item-email';
+    emailDiv.textContent = c.email || '–';
+
+    div.appendChild(nameDiv);
+    div.appendChild(emailDiv);
+    div.addEventListener('click', function() {
+      bulkContacts.push(c);
+      renderBulkSelected();
+      $('bulkSearchInput').value = '';
+      $('bulkSearchResults').classList.remove('visible');
+      $('bulkSearchResults').innerHTML = '';
+      refreshStageStatus();
+    });
+    container.appendChild(div);
+  });
+}
+
+function renderBulkSelected() {
+  var container = $('bulkSelectedList');
+  container.innerHTML = '';
+  bulkContacts.forEach(function(c, idx) {
+    var fullName = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || '(no name)';
+
+    var chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = fullName;
+
+    var rm = document.createElement('button');
+    rm.className = 'chip-remove';
+    rm.type = 'button';
+    rm.textContent = '✕';
+    rm.addEventListener('click', function() {
+      bulkContacts.splice(idx, 1);
+      renderBulkSelected();
+      refreshStageStatus();
+    });
+
+    chip.appendChild(rm);
+    container.appendChild(chip);
+  });
+  $('bulkSelectedHint').style.display = bulkContacts.length ? 'none' : '';
+}
+
 // ── Projects ─────────────────────────────────────────────────────────────────
 
 function loadProjects() {
@@ -466,21 +586,33 @@ $('stageSelect').addEventListener('change', function() {
 });
 
 // Loads the current stage/status of the matched contact on the selected project and prefills.
+// In bulk mode there is no single "current" stage/status to prefill (each candidate may sit
+// somewhere different) — the user just picks the target stage/status to apply to everyone.
 function refreshStageStatus() {
   var projectId = $('projectSelect').value;
   var area = $('stageStatusArea');
   var hint = $('stageStatusHint');
   currentLink = null;
 
-  if (!projectId || !matchedContact) {
+  var hasTarget = bulkMode ? bulkContacts.length > 0 : Boolean(matchedContact);
+
+  if (!projectId || !hasTarget) {
     area.style.display = 'none';
     return;
   }
 
   area.style.display = '';
-  hint.style.display = 'none';
+  $('stageSelect').disabled = false;
   $('stageSelect').value = '';
   fillStatusOptions('', null);
+
+  if (bulkMode) {
+    hint.textContent = 'Applies to every selected candidate who is already on this project. Candidates not yet on the project only get the email logged, stage/status is skipped for them.';
+    hint.style.display = '';
+    return;
+  }
+
+  hint.style.display = 'none';
 
   sbSelect('/contacts_projects?contact_id=eq.' + encodeURIComponent(matchedContact.contact_id) +
            '&project_id=eq.' + encodeURIComponent(projectId) +
@@ -526,6 +658,11 @@ $('saveBtn').addEventListener('click', function() {
 
   var projectId = $('projectSelect').value || null;
   var body      = $('emailBodyInput').value;   // subject is read inside buildHeader()
+
+  if (bulkMode) {
+    saveBulk(projectId, body);
+    return;
+  }
 
   var payload = {
     contact_id:   (matchedContact && matchedContact.contact_id) || null,
@@ -585,3 +722,85 @@ $('saveBtn').addEventListener('click', function() {
       $('saveBtn').disabled = false;
     });
 });
+
+// ── Step 3b: Send (bulk mode) ───────────────────────────────────────────────
+// For every selected candidate: log the (possibly edited) email as its own `activities` row,
+// then — only if a target stage AND status were picked, and that candidate is already linked
+// to the project — call apply_status_change() with that row's activity_id. Same "reference,
+// not copy" pattern as the single-candidate flow: reason_header/footer stay empty, the app
+// timeline shows the linked email as the reason unless someone overrides it manually.
+function saveBulk(projectId, body) {
+  if (!bulkContacts.length) {
+    setStatus('error', '✗ Select at least one candidate first.');
+    isSaving = false;
+    $('saveBtn').disabled = false;
+    $('saveBtnText').textContent = 'Send to Database';
+    return;
+  }
+
+  var header       = buildHeader();
+  var newStage     = $('stageSelect').value || null;
+  var newStatus    = $('statusSelect').value || null;
+  var wantsChange  = Boolean(projectId && newStage && newStatus);
+
+  var loggedCount  = 0;
+  var changedCount = 0;
+  var skipped      = []; // names not updated (not on project / error)
+
+  var chain = Promise.resolve();
+  bulkContacts.forEach(function(c) {
+    var label = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || c.contact_id.slice(0, 8);
+
+    chain = chain.then(function() {
+      var payload = {
+        contact_id:   c.contact_id,
+        project_id:   projectId,
+        user_id:      sbGetUserId() || null,
+        email_body:   body,
+        received:     emailData.received,
+        email_header: header,
+      };
+
+      return sbInsert('activities', payload).then(function(result) {
+        loggedCount++;
+        if (!wantsChange) return;
+
+        return sbSelect('/contacts_projects?contact_id=eq.' + encodeURIComponent(c.contact_id) +
+                 '&project_id=eq.' + encodeURIComponent(projectId) +
+                 '&select=stage,status&limit=1')
+          .then(function(rows) {
+            if (!rows || !rows.length) {
+              skipped.push(label + ' (not on project)');
+              return;
+            }
+            var activityId = (result && result.email_activity_id) || null;
+            return sbRpc('apply_status_change', {
+              p_contact_id:  c.contact_id,
+              p_project_id:  projectId,
+              p_stage:       newStage,
+              p_status:      newStatus,
+              p_activity_id: activityId,
+            }).then(function() { changedCount++; });
+          });
+      }).catch(function(err) {
+        skipped.push(label + ' (error: ' + err.message + ')');
+      });
+    });
+  });
+
+  chain.then(function() {
+    var msg = loggedCount
+      ? ('✓ Email logged for ' + loggedCount + ' of ' + bulkContacts.length + ' candidate(s)')
+      : '✗ Nothing was saved.';
+    if (wantsChange) msg += '\nStage/Status applied: ' + changedCount + ' of ' + bulkContacts.length;
+    if (skipped.length) msg += '\nSkipped: ' + skipped.join(', ');
+    setStatus(loggedCount ? 'success' : 'error', msg);
+    $('saveBtnText').textContent = 'Send again';
+  }).catch(function(err) {
+    setStatus('error', '✗ Error: ' + err.message);
+    $('saveBtnText').textContent = 'Try again';
+  }).finally(function() {
+    isSaving = false;
+    $('saveBtn').disabled = false;
+  });
+}
